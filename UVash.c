@@ -4,142 +4,162 @@
 #include<string.h>
 #include<sys/wait.h>
 
-int main (int argc, char **argv) {
+/**
+ * Función que comprueba el formato de una linea y devuelve 0 si es correcto
+ * y 1 si no lo es.
+ */
+int lineformat(char *line) {
+
+	int last_char = strlen(line) - 1;
+
+	if (line[0] == '&')
+		return 1;
+
+	for (int i = 0; i < last_char-1; i++)
+
+		if (line[i] == '&' && line[i+1] == '&')
+			return 1;		
+
+	return 0;
+}
+
+int main(int argc, char **argv) {
 
 	//COMPRUEBA LOS ARGUMENTOS DEL MAIN
 	if (argc > 2) {
-
 		fprintf(stderr, "An error has occurred\n");
-		return 1;
+		exit(1);
 	}
-
+	
 	//DECALARA VARIABLES
-	FILE *stream	= stdin;
-	char *line		= NULL;
-	char *word		= NULL;
-	char **args		= NULL;
-	int mode		= 0;
-	size_t n		= 0;
-	int index;
+	int mode = 0;
+	FILE *stream = stdin;
+	char *line = NULL;
+	char *comand = NULL;
+	char **argument = NULL;
+	size_t n = 0;
+	int n_arg = 0;
+	int child_number = 0;
 	pid_t pid;
+
+	//RESERVAMOS MEMORIA DINAMICA
+	argument = (char**) malloc(sizeof(char*));
 
 	//COMPRUEBA SI ESTÁ EN MODO BATCH
 	if (argc == 2) {
-
 		if ((stream = fopen(argv[1], "r")) == NULL) {
 			fprintf(stderr, "An error has occurred\n");
-			return 1;
+			exit(1);
 		}
 
 		mode = 1;
 	}
 
-	//INCIA EL BUCLE
+	//INICIO DEL BUCLE CONTINUO
 	while(1) {
-
+		
 		if (mode == 0)
 			printf("UVash> ");
 
-		//LEE UNA LINEA DEL STREAM Y AÑADE \0 AL FINAL
-		if (getline(&line, &n, stream) == -1)
-			exit(0);
-
+		//LEE UNA LINEA DEL STREAM Y ELIMINA EL '\n'
+		if (getline(&line, &n, stream) == -1) exit(0);
 		line[strlen(line) - 1] = '\0';
 
-		//INICIALIZA VARIABLES
-		args = (char**) malloc(sizeof(char*) * strlen(line));
-		index = 0;
-
-		//SEPARA LA LINEA EN SUS ARGUMENTOS
-		while ((word = strsep(&line, " ")) != NULL) 
-
-			if (strcmp(word, "") != 0){
-				args[index] = word;
-				index++;
-			}
-
-		//COLOCA UN NULL AL FINAL DEL ARRAY DE STRINGS
-		args[index] = NULL;
-
-		//COMPRUEBA QUE NO ESTÉ VACIO
-		if (index == 0){
-			free(args);
+		//COMPRUEBA EL FORMATO PARA EVITAR CASOS NO VALIDOS
+		if (lineformat(line)) {
+			fprintf(stderr, "An error has occurred\n");
 			continue;
 		}
-
-		//BUILD-IN COMAND: CD
-		if (strcmp(args[0], "cd") == 0){
-
-			if (index != 2)
-
-				fprintf(stderr, "An error has occurred\n");
 			
-			else {
 
-				if (chdir(args[1]) == -1)
+		//DIVIDE LA LINEA EN COMANDOS
+		while((comand = strsep(&line, "&")) != NULL) {
 
-					fprintf(stderr, "An error has occurred\n");
-			 }
-			
-			free(args);
-			continue;
-		}
-
-		//BUILD-IN COMAND: EXIT
-		if (strcmp(args[0], "exit") == 0) {
-
-			if (index != 1) {
-
-				fprintf(stderr, "An error has occurred\n");
-				free(args);
+			if (!strcmp(comand, "")) {
 				continue;
 			}
-			
-			exit(0);	
-		}	
-	
-		//CREA UN PROCESO HIJO
-		if ((pid = fork()) == -1) 
-			return 1;
 
-		if (pid == 0) {
+			//DIVIDE CADA COMANDO EN ARGUMENTOS
+			while((argument[n_arg] = strsep(&comand, " ")) != NULL) {
 
-			//COMPRUEBA SI HAY REDIRECCION
-			for (int i = 0; i < index; i++) 
-
-				if (strcmp(args[i], ">") == 0){
-
-					if ((i != 0) && (i == (index - 2))) {
-					
-						FILE *fout = fopen(args[index - 1], "w");
-							
-						dup2(fileno(fout), STDOUT_FILENO);
-						dup2(fileno(fout), STDERR_FILENO);
-
-						args[i] = NULL;
-					}
-
-					else {
-						fprintf(stderr, "An error has occurred\n");
-						exit(0);
-					}
+				if (!strcmp(argument[n_arg], "")) {
+					continue;
 				}
 
-			//EJECUTA EL COMANDO
-			execvp(args[0], args);
+				n_arg++;
+				argument = (char**) realloc(argument, sizeof(char*) + sizeof(char*) * n_arg);
+			}
 
-			fprintf(stderr, "An error has occurred\n");
-			exit(0);
-		}
+			//AÑADE UN NULL AL FINAL DEL ARRAY DE ARGUMENTOS
+			argument[n_arg] = NULL;
 
-		wait(NULL);
-		free(args);
-	}
+			//COMPRUEBA QUE EL COMANDO NO STUVIESE VACIO
+			if (n_arg == 0)
+				break;
 
+			//EJECUTA EL BUILD-IN COMAND
+			if (!strcmp(argument[0], "cd")) {
+				if (n_arg != 2)
+					fprintf(stderr, "An error has occurred\n");
 
+				else
+					if(chdir(argument[1]) == -1)
+						fprintf(stderr, "An error has occurred\n");
 
+			}
 
+			else if (!strcmp(argument[0], "exit")) {
+				if (n_arg != 1)
+					fprintf(stderr, "An error has occurred\n");
 
+				else
+					exit(0);
+			}
 
+			//SI NO ES UN BUILD-IN COMAND
+			else{
+				
+				//CREAMOS UN PROCESO HIJO
+				if((pid = fork()) == -1)
+					return 1;
 
+				if (pid == 0) {
+
+					//COMPROBAMOS SI HAY REDIRECCION
+					for (int i = 0; argument[i] != NULL; i++)
+
+						if (!strcmp(argument[i], ">")){
+
+							if(i != 0 && i == n_arg-2) {
+
+								FILE *fout = fopen(argument[i+1], "w");
+								dup2(fileno(fout), STDOUT_FILENO);
+								dup2(fileno(fout), STDERR_FILENO);
+								argument[i] = NULL;
+							}
+
+							else {
+								fprintf(stderr, "An error has occurred\n");
+								exit(0);
+							}
+						}
+					
+					//EJECUTAMOS EL COMANDO
+					execvp(argument[0], argument);
+					fprintf(stderr, "An error has occurred\n");
+					exit(0);
+				}
+
+				child_number++;
+			}
+
+			n_arg = 0;
+		}//del while((comand = ...)
+
+		for (int j = 0; j < child_number; j++)
+			waitpid(0, NULL, 0);
+
+		child_number = 0;
+	
+	}//del while(1)
 }
